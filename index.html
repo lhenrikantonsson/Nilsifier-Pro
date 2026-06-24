@@ -79,11 +79,19 @@ h1 { font-size: 22px; line-height: 1; margin: 0; letter-spacing: .03em; }
 .dot.ok { background: var(--green); }
 .zoomBtns { display: flex; gap: 6px; }
 .zbtn { font-size: 13px; padding: 6px 10px; }
+.toolGroup { display: flex; gap: 6px; align-items: center; padding: 5px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.toolGroup .btn { padding: 7px 11px; font-size: 13px; border-radius: 11px; }
+.toolHint { color: var(--muted); font-size: 12px; margin-left: 4px; white-space: nowrap; }
 .sheets { display: flex; gap: 10px; overflow: auto; padding: 10px 18px; border-bottom: 1px solid var(--line); }
 .sheetbtn { white-space: nowrap; }
 .sheetbtn.on { background: var(--amber); color: #201600; }
 
 .view { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #0e0e0b; touch-action: none; }
+.view.editing .pocket { cursor: grab; }
+.view.editing .pocket:active { cursor: grabbing; }
+.view.panning, .view.panning * { cursor: grab; }
+.viewHelp { position: absolute; left: 14px; top: 14px; z-index: 2; pointer-events: none; background: rgba(18,17,13,.72); border: 1px solid #3b3521; color: #d1b671; border-radius: 10px; padding: 7px 10px; font: 12px ui-monospace,monospace; }
+.viewHelp:empty { display: none; }
 .plane { width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }
 .drawing { overflow: visible; }
 .hidden { display: none !important; }
@@ -132,9 +140,9 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; }
     </section>
 </aside>
 <main class="main">
-    <div class="toolbar"><div class="tabs"><button id="t2" class="tab">Cut drawing</button><button id="t3" class="tab on">3D preview</button></div><div class="zoomBtns"><button class="btn zbtn" id="zin">+</button><button class="btn zbtn" id="zout">−</button><button class="btn zbtn" id="zfit">fit</button><button class="btn zbtn" id="explode">explode</button></div><div class="stats"><span><i id="dot" class="dot"></i> <b id="placed">0/0</b> placed</span><span>sheets <b id="sheetCount">0</b></span><span>fill <b id="fill">0%</b></span><span id="dims"></span></div></div>
+    <div class="toolbar"><div class="tabs"><button id="t2" class="tab">Cut drawing</button><button id="t3" class="tab on">3D preview</button></div><div class="zoomBtns"><button class="btn zbtn" id="zin">+</button><button class="btn zbtn" id="zout">−</button><button class="btn zbtn" id="zfit">fit</button><button class="btn zbtn" id="explode">explode</button></div><div id="drawTools" class="toolGroup hidden"><button id="moveTool" class="btn">move pockets</button><button id="panTool" class="btn">pan drawing</button><span id="drawHint" class="toolHint"></span></div><div class="stats"><span><i id="dot" class="dot"></i> <b id="placed">0/0</b> placed</span><span>sheets <b id="sheetCount">0</b></span><span>fill <b id="fill">0%</b></span><span id="dims"></span></div></div>
     <div id="sheetTabs" class="sheets"></div>
-    <div id="view" class="view"><div id="plane" class="plane hidden"><svg id="svgdraw" class="drawing" xmlns="http://www.w3.org/2000/svg"></svg></div><canvas id="c3"></canvas></div>
+    <div id="view" class="view"><div id="viewHelp" class="viewHelp"></div><div id="plane" class="plane hidden"><svg id="svgdraw" class="drawing" xmlns="http://www.w3.org/2000/svg"></svg></div><canvas id="c3"></canvas></div>
     <div id="warnings" class="warn"></div>
 </main>
 </div>
@@ -160,7 +168,7 @@ const PRESETS = [
 const STOCK_THICKNESSES=[10,15,20,25,30,40,50,60];
 
 let state={case:{x:240,y:140,z:50},params:{clear:2,wall:8,edge:8,base:6,sheet:28,stack:true,sheetMode:'auto',stockSheets:STOCK_THICKNESSES.join(','),layerCount:0,manualLayers:'28'},items:[{id:id(),name:'TP-Link AC1200',shape:'rect',w:217,l:47,h:35,qty:1,color:C[ci++]},{id:id(),name:'Antenna',shape:'rect',w:186,l:17,h:17,qty:2,color:C[ci++]},{id:id(),name:'PoE injector',shape:'rect',w:85,l:42,h:31,qty:1,color:C[ci++]},{id:id(),name:'Hercules mic clip',shape:'clamp',w:105,l:80,h:45,jaw:34,throat:42,qty:1,color:C[ci++]},{id:id(),name:'PowerCON adapter',shape:'rect',w:80,l:30,h:25,qty:1,color:C[ci++]},{id:id(),name:'Cable coil',shape:'circle',dia:80,h:30,qty:1,color:C[ci++]}]};
-let model={sheets:[],unplaced:[],all:[],sheetPlan:[]},active=0,view3=true,zoom={s:1,x:0,y:0},drag=null,cam={scale:1,rot:.62,tilt:.75,panX:0,panY:0};
+let model={sheets:[],unplaced:[],all:[],sheetPlan:[]},active=0,view3=true,view3Sheet='all',drawTool='move',zoom={s:1,x:0,y:0},drag=null,cam={scale:1,rot:.62,tilt:.75,panX:0,panY:0};
 let dragIndex=null, modeWidget=false, planCache=new Map();
 
 const pdef=[['clear','Pocket clearance','gap around item',0,20,.5],['wall','Wall between pockets','foam left between pockets',0,40,1],['edge','Edge margin','foam border to wall',0,40,1],['base','Base thickness','uncut floor per sheet',0,40,1]];
@@ -384,9 +392,21 @@ function renderExportTree(){
 
 function renderSheetTabs(){
     let h='';
-    model.sheets.forEach((s,i)=>h+=`<button class="btn sheetbtn ${i===active?'on':''}" data-i="${i}">Sheet ${i+1} · ${fmtMm(s.thickness||0)} mm (${s.items.length})</button>`);
+    if(view3&&model.sheets.length>1){
+        h+=`<button class="btn sheetbtn ${view3Sheet==='all'?'on':''}" data-all="1">All sheets 3D</button>`;
+    }
+    model.sheets.forEach((s,i)=>{
+        let on=view3?(view3Sheet==='single'&&i===active):i===active;
+        let label=view3?`Sheet ${i+1} only · ${fmtMm(s.thickness||0)} mm (${s.items.length})`:`Sheet ${i+1} · ${fmtMm(s.thickness||0)} mm (${s.items.length})`;
+        h+=`<button class="btn sheetbtn ${on?'on':''}" data-i="${i}">${label}</button>`
+    });
     $('#sheetTabs').innerHTML=h;
-    $('#sheetTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{active=+b.dataset.i;fit2D();render()})
+    $('#sheetTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+        if(b.dataset.all){view3Sheet='all';renderSheetTabs();render3D();return}
+        active=+b.dataset.i;
+        if(view3){view3Sheet='single';render();return}
+        fit2D();render()
+    })
 }
 
 function renderWarnings(){
@@ -425,7 +445,7 @@ function render2D(){
     svg.setAttribute('width',X);svg.setAttribute('height',Y);svg.setAttribute('viewBox',`0 0 ${X} ${Y}`);
     let h=`<defs><pattern id="h" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#57554a"/><line x1="0" y1="0" x2="0" y2="8" stroke="#6b6859" stroke-width="2"/></pattern></defs><rect x="0" y="0" width="${X}" height="${Y}" rx="3" fill="url(#h)" stroke="#f2a900" stroke-width="1.5"/>`;
     for(const p of s.items)h+=`<g class="pocket" data-k="${p.key}">${pocketSvg(p,true)}</g>`;
-    svg.innerHTML=h;apply2D();bindDrag()
+    svg.innerHTML=h;apply2D();bindDrag();syncViewControls()
 }
 
 function apply2D(){let p=$('#plane');p.style.transform=`translate(${zoom.x}px,${zoom.y}px) scale(${zoom.s})`}
@@ -441,14 +461,28 @@ function svgPoint(e){let svg=$('#svgdraw'),pt=svg.createSVGPoint();pt.x=e.client
 
 function bindDrag(){
     $('#svgdraw').querySelectorAll('.pocket').forEach(g=>{
-        g.onpointerdown=e=>{let s=model.sheets[active],p=s.items.find(q=>q.key===g.dataset.k);if(!p)return;let pt=svgPoint(e);drag={p,dx:pt.x-p.x,dy:pt.y-p.y};g.setPointerCapture(e.pointerId)};
-        g.onpointermove=e=>{
-            if(!drag)return;let pt=svgPoint(e);
-            let s=model.sheets[active], X=s.sheetW||state.case.x, Y=s.sheetH||state.case.y;
-            drag.p.x=clamp(pt.x-drag.dx,0,X-drag.p.w);drag.p.y=clamp(pt.y-drag.dy,0,Y-drag.p.h);
-            render2D()
+        g.onpointerdown=e=>{
+            if(drawTool!=='move')return;
+            let s=model.sheets[active],p=s.items.find(q=>q.key===g.dataset.k);if(!p)return;
+            let pt=svgPoint(e);
+            drag={p,g,dx:pt.x-p.x,dy:pt.y-p.y,ox:p.x,oy:p.y,nx:p.x,ny:p.y};
+            g.setPointerCapture(e.pointerId);
+            e.preventDefault();e.stopPropagation();
         };
-        g.onpointerup=()=>{drag=null;renderStats()}
+        g.onpointermove=e=>{
+            if(!drag||drag.g!==g)return;
+            let pt=svgPoint(e),s=model.sheets[active], X=s.sheetW||state.case.x, Y=s.sheetH||state.case.y;
+            drag.nx=clamp(pt.x-drag.dx,0,X-drag.p.w);drag.ny=clamp(pt.y-drag.dy,0,Y-drag.p.h);
+            g.setAttribute('transform',`translate(${r2(drag.nx-drag.ox)} ${r2(drag.ny-drag.oy)})`);
+            e.preventDefault();e.stopPropagation();
+        };
+        function endDrag(e){
+            if(!drag||drag.g!==g)return;
+            drag.p.x=drag.nx;drag.p.y=drag.ny;g.removeAttribute('transform');drag=null;
+            render2D();renderStats();
+            if(e){e.preventDefault();e.stopPropagation();}
+        }
+        g.onpointerup=endDrag;g.onpointercancel=endDrag;
     })
 }
 
@@ -465,7 +499,7 @@ function setupViewport(){
     v.addEventListener('pointerdown',e=>{
         pts.set(e.pointerId,{x:e.clientX,y:e.clientY});v.setPointerCapture(e.pointerId);
         if(pts.size===2){let a=[...pts.values()];pinch={d:dist(a[0],a[1]),m:mid(a[0],a[1]),s:view3?cam.scale:zoom.s,x:zoom.x,y:zoom.y,panX:cam.panX,panY:cam.panY};last=null;return}
-        if(e.target.closest('.pocket'))return;last={x:e.clientX,y:e.clientY}
+        if(!view3&&drawTool==='move'&&e.target.closest('.pocket'))return;last={x:e.clientX,y:e.clientY}
     });
     v.addEventListener('pointermove',e=>{
         if(!pts.has(e.pointerId))return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -517,7 +551,8 @@ function render3D(){
     if(!r.width||!r.height)return;
     cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,r.width,r.height);
     let W=state.case.x,H=state.case.y,explode=cam.explode??1.8;
-    let sheets=model.sheets.length?model.sheets:[{items:[],sheetW:W,sheetH:H,thickness:state.params.sheet}];
+    let allSheets=model.sheets.length?model.sheets:[{items:[],sheetW:W,sheetH:H,thickness:state.params.sheet}];
+    let sheets=(view3Sheet==='single'&&allSheets[active])?[{...allSheets[active],_sheetIndex:active}]:allSheets.map((s,i)=>({...s,_sheetIndex:i}));
     let thicknesses=sheets.map(s=>Math.max(1,n(s.thickness||state.params.sheet)));
     let maxT=Math.max(1,...thicknesses),gap=(state.params.stack?Math.max(28,maxT*explode):10),totalZ=thicknesses.reduce((a,b)=>a+b,0)+gap*Math.max(0,sheets.length-1);
     let baseScale=Math.min(r.width/Math.max(1,(W+H*.82)),r.height/Math.max(1,(H*.58+totalZ*1.05)))*1.55*cam.scale;
@@ -532,7 +567,7 @@ function render3D(){
         poly([[0,cH,z],[cW,cH,z],[cW,cH,z-T],[0,cH,z-T]],'#454238','#242217');
         poly([[cW,0,z],[cW,cH,z],[cW,cH,z-T],[cW,0,z-T]],'#3b392f','#242217');
         poly([[0,0,z],[0,cH,z],[0,cH,z-T],[0,0,z-T]],'#343228','#242217');
-        label('Sheet '+(si+1)+' · '+fmtMm(T)+' mm  ('+s.items.length+')',8,8,z+8);
+        label('Sheet '+((s._sheetIndex??si)+1)+' · '+fmtMm(T)+' mm  ('+s.items.length+')',8,8,z+8);
         s.items.forEach(p=>{
             let zt=z+3;
             let pts=shapePoly(p,zt);
@@ -542,11 +577,23 @@ function render3D(){
     });
     ctx.save();ctx.font='12px ui-monospace,monospace';ctx.fillStyle='#9b927e';
     let tag=modeWidget?'export per widget ON':(state.params.stack?(state.params.sheetMode==='manual'?'fixed layer stack':'auto stock layers'):'vertical stack OFF · one sheet only');
-    ctx.fillText(`${tag} · foam ${planLabel(thicknesses)} mm`,14,r.height-16);
+    let filterTag=(view3Sheet==='single'&&allSheets.length>1)?`view Sheet ${active+1} only`:'view all sheets';
+    ctx.fillText(`${tag} · ${filterTag} · foam ${planLabel(thicknesses)} mm`,14,r.height-16);
+    syncViewControls();
     ctx.restore()
 }
 
 function field(i,k,label,val,extra=''){return `<div><label>${label}</label><input class="inp mini" data-i="${i}" data-k="${k}" type="number" value="${val??0}" ${extra}></div>`}
+
+function syncViewControls(){
+    let tools=$('#drawTools'),view=$('#view'),help=$('#viewHelp'),hint=$('#drawHint');
+    if(tools)tools.classList.toggle('hidden',view3);
+    if($('#moveTool'))$('#moveTool').classList.toggle('amber',drawTool==='move');
+    if($('#panTool'))$('#panTool').classList.toggle('amber',drawTool==='pan');
+    if(view){view.classList.toggle('editing',!view3&&drawTool==='move');view.classList.toggle('panning',!view3&&drawTool==='pan')}
+    if(hint)hint.textContent=drawTool==='move'?'drag pocket to move · blank space pans':'drag anywhere to pan';
+    if(help)help.textContent=view3?(view3Sheet==='single'?`3D filter: Sheet ${active+1} only`:'3D filter: all sheets'):(drawTool==='move'?'Move mode: drag pockets, drag blank space to pan':'Pan mode: drag anywhere to move the drawing');
+}
 
 function refreshAfterFoamEdit(){planCache.clear();recalc();view3?fit3D():fit2D()}
 function syncManualLayerState(list){
@@ -823,8 +870,10 @@ function init(){
         if(modeWidget){state.params.stack=false;syncStackButton()}
         refreshAfterFoamEdit()
     };
-    $('#t2').onclick=()=>{view3=false;$('#t2').classList.add('on');$('#t3').classList.remove('on');$('#plane').classList.remove('hidden');$('#c3').classList.add('hidden');render2D();fit2D()};
-    $('#t3').onclick=()=>{view3=true;$('#t3').classList.add('on');$('#t2').classList.remove('on');$('#c3').classList.remove('hidden');$('#plane').classList.add('hidden');render3D()};
+    $('#t2').onclick=()=>{view3=false;$('#t2').classList.add('on');$('#t3').classList.remove('on');$('#plane').classList.remove('hidden');$('#c3').classList.add('hidden');renderSheetTabs();syncViewControls();render2D();fit2D()};
+    $('#t3').onclick=()=>{view3=true;$('#t3').classList.add('on');$('#t2').classList.remove('on');$('#c3').classList.remove('hidden');$('#plane').classList.add('hidden');renderSheetTabs();syncViewControls();render3D()};
+    $('#moveTool').onclick=()=>{drawTool='move';syncViewControls();render2D()};
+    $('#panTool').onclick=()=>{drawTool='pan';syncViewControls();render2D()};
     $('#zin').onclick=()=>{if(view3){cam.scale*=1.2;render3D()}else{zoom.s*=1.2;apply2D()}};
     $('#zout').onclick=()=>{if(view3){cam.scale/=1.2;render3D()}else{zoom.s/=1.2;apply2D()}};
     $('#zfit').onclick=()=>{view3?fit3D():fit2D()};
