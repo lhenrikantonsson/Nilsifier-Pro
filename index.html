@@ -122,11 +122,11 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; }
             <button id="svg" class="btn">SVG zip</button>
             <button id="csv" class="btn">CSV</button>
             <button id="all" class="btn">All zip</button>
-            <button id="json" class="btn">Export JSON</button>
-            <label for="importJson" class="btn" style="cursor:pointer; display:inline-block; text-align:center;">Import JSON</label>
+            <button id="json" class="btn" title="Save this project so you can reopen the exact app state later">Save project</button>
+            <label for="importJson" class="btn" title="Open a Foam Cutter project save file" style="cursor:pointer; display:inline-block; text-align:center;">Open project</label>
             <input type="file" id="importJson" accept=".json" style="display:none;">
         </div>
-        <p class="notice" style="margin-top:14px">Live recalculation on every edit. Vertical stack ON uses the layer plan: auto stock proposal or fixed manual sheets. OFF tries one sheet only. Exports always include every placed pocket and a separate unplaced report.</p>
+        <p class="notice" style="margin-top:14px">Live recalculation on every edit. Vertical stack ON uses the layer plan: auto stock proposal or fixed manual sheets. OFF tries one sheet only. <b>Save project</b> creates a small .json app save-state file with your case, foam settings, layer plan, gear, and current layout. <b>Open project</b> restores it later. Export zips are for cutting files and reports.</p>
         
         <div id="exportTree" class="notice" style="margin-top:14px; font: 13px ui-monospace,monospace; white-space:pre-wrap; background:#1b1509; border-color:#4a3a14; color:#d1b671;"></div>
     </section>
@@ -371,7 +371,7 @@ function renderExportTree(){
     });
     
     files.push(` ├─ 📊 cut-list.csv  [Data table]`);
-    files.push(` ├─ 💾 project.json  [Save file]`);
+    files.push(` ├─ 💾 project.json  [App save-state: reopen later]`);
     
     if(model.unplaced.length) {
         files.push(` └─ ⚠️ UNPLACED.txt  [${model.unplaced.length} items did not fit]`);
@@ -830,7 +830,7 @@ function init(){
     $('#zfit').onclick=()=>{view3?fit3D():fit2D()};
     $('#explode').onclick=()=>{cam.explode=(cam.explode||1.8)>=3?.8:(cam.explode||1.8)+.8;render3D()};
     $('#csv').onclick=()=>dl('foam-cut-list.csv',rows(),'text/csv');
-    $('#json').onclick=()=>dl('foam-project.json',JSON.stringify(state,null,2),'application/json');
+    $('#json').onclick=()=>dl('foam-cutter-project-save.json',JSON.stringify(state,null,2),'application/json');
     
     $('#importJson').onchange=(e)=>{
         let file = e.target.files[0];
@@ -844,10 +844,10 @@ function init(){
                     syncCaseInputs();syncParamInputs();renderFoamConfig();syncStackButton();
                     renderItems(); recalc(); view3 ? fit3D() : fit2D();
                 } else {
-                    alert("Invalid or corrupted project file format.");
+                    alert("That does not look like a Foam Cutter project save file.");
                 }
             } catch(err) {
-                alert("Error reading JSON file.");
+                alert("Could not open this project save file. It may be damaged or not valid JSON.");
             }
             e.target.value = ''; 
         };
